@@ -78,4 +78,64 @@ final class ProcessOrchestrator
 			]);
 		}
 	}
+	public function fanOut(int $processId, string $joinGroup, array $steps): void
+	{
+		$this->db->beginTransaction();
+
+		foreach ( $steps as $stepName )
+		{
+			$this->db->executeStatement('INSERT INTO process_step (process_instance_id, step_name, status, join_group)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (process_instance_id, step_name) DO NOTHING', [
+					$processId,
+					$stepName,
+					'PENDING',
+					$joinGroup
+			]);
+
+			$this->bus->dispatch(new RunProcessStepMessage($processId, $stepName));
+		}
+
+		$this->db->commit();
+	}
+	public function tryJoin(int $processId, string $joinGroup, string $nextStep): void
+	{
+		$this->db->beginTransaction();
+
+		// Блокируем все шаги группы
+		$rows = $this->db->fetchAllAssociative('SELECT id, status FROM process_step
+         WHERE process_instance_id = ? AND join_group = ?
+         FOR UPDATE', [
+				$processId,
+				$joinGroup
+		]);
+
+		foreach ( $rows as $row )
+		{
+			if ($row['status'] !== 'DONE')
+			{
+				$this->db->rollBack();
+				return; // барьер ещё не пройден
+			}
+		}
+
+		// Проверяем, что следующий шаг ещё не создан
+		$exists = $this->db->fetchOne('SELECT 1 FROM process_step WHERE process_instance_id = ? AND step_name = ?', [
+				$processId,
+				$nextStep
+		]);
+
+		if (!$exists)
+		{
+			$this->db->insert('process_step', [
+					'process_instance_id' => $processId,
+					'step_name' => $nextStep,
+					'status' => 'PENDING'
+			]);
+
+			$this->bus->dispatch(new RunProcessStepMessage($processId, $nextStep));
+		}
+
+		$this->db->commit();
+	}
 }

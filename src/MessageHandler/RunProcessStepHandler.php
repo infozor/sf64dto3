@@ -6,9 +6,6 @@ namespace App\MessageHandler;
 use App\Message\RunProcessStepMessage;
 //use App\Process\ProcessOrchestrator;
 use App\ModuleProcess\Orchestrator\ProcessOrchestrator;
-
-
-
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
@@ -44,5 +41,11 @@ final class RunProcessStepHandler
 		sleep(1); // имитация работы
 
 		$this->orchestrator->markStepDone($message->processId, $message->stepName);
+
+		// Если шаг участвует в fan-out группе — пытаемся пройти join
+		if ($step['join_group'])
+		{
+			$this->orchestrator->tryJoin($message->processId, $step['join_group'], 'finalize');
+		}
 	}
 }
