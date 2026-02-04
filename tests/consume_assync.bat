@@ -1,0 +1,1 @@
+php -dxdebug.start_with_request=yes D:\site2_sf\symfony7\sf64dto3\bin/console messenger:consume async
