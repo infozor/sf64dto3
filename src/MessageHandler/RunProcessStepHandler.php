@@ -40,6 +40,20 @@ final class RunProcessStepHandler
 		// Бизнес-логика шага
 		sleep(1); // имитация работы
 
+		// 2. Выполняем бизнес-логику
+		try
+		{
+			$aaa = $message->stepName;
+		}
+		catch ( \Throwable $e )
+		{
+			// 5. Любая ошибка = FAILED
+			$this->orchestrator->markStepFailed($message->processId, $message->stepName, $e->getMessage());
+
+			// 6. Пробрасываем исключение, чтобы Messenger сделал retry / failure transport
+			throw $e;
+		}
+
 		$this->orchestrator->markStepDone($message->processId, $message->stepName);
 
 		// Если шаг участвует в fan-out группе — пытаемся пройти join

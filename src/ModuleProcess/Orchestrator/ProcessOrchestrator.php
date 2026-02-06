@@ -138,4 +138,47 @@ final class ProcessOrchestrator
 
 		$this->db->commit();
 	}
+	public function markStepFailed(int $processId, string $stepName, string $error): void
+	{
+		$this->db->beginTransaction();
+
+		$step = $this->db->fetchAssociative('SELECT * FROM process_step WHERE process_instance_id = ? AND step_name = ? FOR UPDATE', [
+				$processId,
+				$stepName
+		]);
+
+		if (!$step)
+		{
+			$this->db->rollBack();
+			throw new \RuntimeException("process_step not found: {$processId} / {$stepName}");
+		}
+
+		// Идемпотентность: если шаг уже DONE — не затираем успешный результат
+		if ($step['status'] === 'DONE')
+		{
+			$this->db->commit();
+			return;
+		}
+
+		// Переводим в FAILED (или обновляем error, если уже FAILED)
+		$this->db->executeStatement('UPDATE process_step
+         SET status = ?, last_error = ?, finished_at = NOW()
+         WHERE id = ?', [
+				'FAILED',
+				mb_substr($error, 0, 4000), // защита от переполнения поля
+				$step['id']
+		]);
+
+		// (опционально) можно перевести весь процесс в FAILED
+		$this->db->executeStatement('UPDATE process_instance
+         SET status = ?
+         WHERE id = ? AND status NOT IN (?, ?)', [
+				'FAILED',
+				$processId,
+				'DONE',
+				'FAILED'
+		]);
+
+		$this->db->commit();
+	}
 }
