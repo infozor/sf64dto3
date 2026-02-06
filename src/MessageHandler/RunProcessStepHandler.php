@@ -45,6 +45,19 @@ final class RunProcessStepHandler
 		{
 			switch ($message->stepName)
 			{
+				case 'prepare' :
+					// Начальный шаг процесса
+					// Пока можно просто “пустышку”, если бизнес-логика не нужна
+					// Либо сюда помещаем инициализацию данных, валидацию, логирование
+
+					if (!method_exists($this, 'callPrepare'))
+					{
+						throw new \LogicException('callPrepare() not implemented');
+					}
+					$this->callPrepare($message->processId);
+
+					break;
+
 				case 'dispatch' :
 					// точка ветвления
 					$this->orchestrator->fanOut($message->processId, 'dispatch_fanout_1', [
@@ -85,6 +98,11 @@ final class RunProcessStepHandler
 			// 3. Если дошли сюда — шаг УСПЕШНО завершён
 			$this->orchestrator->markStepDone($message->processId, $message->stepName);
 
+			if ($message->stepName === 'prepare')
+			{
+				$this->orchestrator->afterPrepare($message->processId);
+			}
+
 			// 4. Если шаг участвует в fan-out группе — пытаемся пройти join
 			if (!empty($step['join_group']))
 			{
@@ -99,14 +117,11 @@ final class RunProcessStepHandler
 			// 6. Пробрасываем исключение, чтобы Messenger сделал retry / failure transport
 			throw $e;
 		}
-
-		$this->orchestrator->markStepDone($message->processId, $message->stepName);
-
-		// Если шаг участвует в fan-out группе — пытаемся пройти join
-		if ($step['join_group'])
-		{
-			$this->orchestrator->tryJoin($message->processId, $step['join_group'], 'finalize');
-		}
+	}
+	private function callPrepare(int $processId): void
+	{
+		// throw new \RuntimeException('API A failed (test)');
+		sleep(1);
 	}
 	private function callApiA(int $processId): void
 	{

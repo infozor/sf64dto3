@@ -15,9 +15,6 @@ final class ProcessOrchestrator
 	}
 	public function startProcess(string $processType, ?string $businessKey, array $payload, ?int $sourceJobId = null): int
 	{
-
-
-
 		$this->db->beginTransaction();
 
 		$processId = $this->db->fetchOne('SELECT id FROM process_instance WHERE process_type = ? AND business_key = ? FOR UPDATE', [
@@ -297,5 +294,25 @@ final class ProcessOrchestrator
 		]);
 
 		$this->db->commit();
+	}
+	public function afterPrepare(int $processId): void
+	{
+		$exists = $this->db->fetchOne('SELECT 1 FROM process_step WHERE process_instance_id = ? AND step_name = ?', [
+				$processId,
+				'dispatch'
+		]);
+
+		if ($exists)
+		{
+			return;
+		}
+
+		$this->db->insert('process_step', [
+				'process_instance_id' => $processId,
+				'step_name' => 'dispatch',
+				'status' => 'PENDING'
+		]);
+
+		$this->bus->dispatch(new RunProcessStepMessage($processId, 'dispatch'));
 	}
 }
