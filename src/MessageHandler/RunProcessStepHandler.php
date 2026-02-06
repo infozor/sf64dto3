@@ -90,6 +90,15 @@ final class RunProcessStepHandler
 					}
 					$this->generateDocument($message->processId);
 					break;
+				case 'finalize':
+					if (!method_exists($this, 'callFinalize'))
+					{
+						throw new \LogicException('callFinalize() not implemented');
+					}
+					$this->callFinalize($message->processId);
+					break;
+					
+					
 
 				default :
 					throw new \LogicException('Unknown step: ' . $message->stepName);
@@ -134,6 +143,10 @@ final class RunProcessStepHandler
 		sleep(1);
 	}
 	private function generateDocument(int $processId): void
+	{
+		sleep(1);
+	}
+	private function callFinalize(int $processId): void
 	{
 		sleep(1);
 	}

@@ -124,6 +124,14 @@ final class ProcessOrchestrator
 				$step['id']
 		]);
 
+		if ($stepName === 'finalize')
+		{
+			$this->db->executeStatement('UPDATE process_instance SET status = ?, finished_at = NOW() WHERE id = ?', [
+					'COMPLETED',
+					$processId
+			]);
+		}
+
 		$this->db->commit();
 	}
 	public function fanOut(int $processId, string $joinGroup, array $steps): void
