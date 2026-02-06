@@ -15,6 +15,9 @@ final class ProcessOrchestrator
 	}
 	public function startProcess(string $processType, ?string $businessKey, array $payload, ?int $sourceJobId = null): int
 	{
+
+
+
 		$this->db->beginTransaction();
 
 		$processId = $this->db->fetchOne('SELECT id FROM process_instance WHERE process_type = ? AND business_key = ? FOR UPDATE', [
@@ -47,7 +50,17 @@ final class ProcessOrchestrator
 
 		return $processId;
 	}
-	public function markStepDone(int $processId, string $step): void
+	/**
+	 *
+	 * @author Ionov AV
+	 * @дата:    06.02.2026
+	 * @время: 14:22
+	 * Описание функции
+	 *  markStepDone() теперь концептуально неверен для архитектуры с fan-out/join.
+	 *        Он относится к старой линейной модели пайплайна и конфликтует с новой моделью процессов.
+	 *        поэтому его убираем (переименовал в markStepDone_line_old)
+	 */
+	public function markStepDone_line_old(int $processId, string $step): void
 	{
 		$this->db->executeStatement('UPDATE process_step SET status = ? WHERE process_instance_id = ? AND step_name = ?', [
 				'DONE',
@@ -78,6 +91,44 @@ final class ProcessOrchestrator
 			]);
 		}
 	}
+	/**
+	 *
+	 * @author Ionov AV
+	 * @дата:    06.02.2026
+	 * @время: 14:26
+	 * Описание функции
+	 * барьер синхронизации (fan-out/join).
+	 */
+	public function markStepDone(int $processId, string $stepName): void
+	{
+		$this->db->beginTransaction();
+
+		$step = $this->db->fetchAssociative('SELECT * FROM process_step WHERE process_instance_id = ? AND step_name = ? FOR UPDATE', [
+				$processId,
+				$stepName
+		]);
+
+		if (!$step)
+		{
+			$this->db->rollBack();
+			throw new \RuntimeException("process_step not found: {$processId} / {$stepName}");
+		}
+
+		if ($step['status'] === 'DONE')
+		{
+			$this->db->commit();
+			return;
+		}
+
+		$this->db->executeStatement('UPDATE process_step
+         SET status = ?, updated_at = NOW()
+         WHERE id = ?', [
+				'DONE',
+				$step['id']
+		]);
+
+		$this->db->commit();
+	}
 	public function fanOut(int $processId, string $joinGroup, array $steps): void
 	{
 		$this->db->beginTransaction();
@@ -98,7 +149,15 @@ final class ProcessOrchestrator
 
 		$this->db->commit();
 	}
-	public function tryJoin(int $processId, string $joinGroup, string $nextStep): void
+	/**
+	 *
+	 * @author Ionov AV
+	 * @дата:    06.02.2026
+	 * @время: 16:48
+	 * Описание функции
+	 *
+	 */
+	public function tryJoin_old(int $processId, string $joinGroup, string $nextStep): void
 	{
 		$this->db->beginTransaction();
 
@@ -137,6 +196,64 @@ final class ProcessOrchestrator
 		}
 
 		$this->db->commit();
+	}
+	/**
+	 *
+	 * @author Ionov AV
+	 * @дата:    06.02.2026
+	 * @время: 16:49
+	 * Описание функции
+	 * Канонически правильная версия tryJoin() (боевой вариант)
+	 */
+	public function tryJoin(int $processId, string $joinGroup, string $nextStep): void
+	{
+		$this->db->beginTransaction();
+
+		$rows = $this->db->fetchAllAssociative('SELECT id, status FROM process_step
+         WHERE process_instance_id = ? AND join_group = ?
+         FOR UPDATE', [
+				$processId,
+				$joinGroup
+		]);
+
+		if (!$rows)
+		{
+			$this->db->rollBack();
+			throw new \RuntimeException("Join group '{$joinGroup}' is empty for process {$processId}");
+		}
+
+		foreach ( $rows as $row )
+		{
+			if ($row['status'] !== 'DONE')
+			{
+				$this->db->commit(); // просто выходим, барьер не пройден
+				return;
+			}
+		}
+
+		$exists = $this->db->fetchOne('SELECT 1 FROM process_step WHERE process_instance_id = ? AND step_name = ?', [
+				$processId,
+				$nextStep
+		]);
+
+		$shouldDispatch = false;
+
+		if (!$exists)
+		{
+			$this->db->insert('process_step', [
+					'process_instance_id' => $processId,
+					'step_name' => $nextStep,
+					'status' => 'PENDING'
+			]);
+			$shouldDispatch = true;
+		}
+
+		$this->db->commit();
+
+		if ($shouldDispatch)
+		{
+			$this->bus->dispatch(new RunProcessStepMessage($processId, $nextStep));
+		}
 	}
 	public function markStepFailed(int $processId, string $stepName, string $error): void
 	{

@@ -22,6 +22,41 @@ final class RunSchedulerCommand extends Command
 	}
 	protected function execute(InputInterface $input, OutputInterface $output): int
 	{
+		
+		
+		//----------для отладки---------------
+		$debug = true;
+		if ($debug)
+		{
+			$value = '150';
+			$orderId = ( int ) $value;
+			
+			/*
+			$this->db->insert('scheduled_jobs', [
+					'job_type' => 'START_PROCESS',
+					'process_type' => 'order_fulfillment',
+					'business_key' => 'ORDER-' . $orderId . 'f',
+					'payload' => json_encode([
+							'orderId' => $orderId
+					]),
+					'scheduled_at' => new \DateTime(),
+			]);
+			*/
+			$this->db->executeStatement(
+					'INSERT INTO scheduled_jobs(job_type, process_type, business_key, payload, scheduled_at)
+                    VALUES (?, ?, ?, ?, NOW())',
+					[
+							'START_PROCESS',
+							'order_fulfillment',
+							'ORDER-' . $orderId . 'f',
+							json_encode(['orderId' => $orderId]),
+					]
+					);
+		}
+		//-----------------------------------------
+		
+		
+		
 		$jobs = $this->db->fetchAllAssociative('SELECT * FROM scheduled_jobs
              WHERE status = ? AND scheduled_at <= NOW()
              ORDER BY scheduled_at
