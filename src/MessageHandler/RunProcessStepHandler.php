@@ -24,7 +24,28 @@ final class RunProcessStepHandler
 				$message->stepName
 		]);
 
-		if (!$step || $step['status'] !== 'PENDING')
+		/*
+		 Сейчас ты проверяешь только PENDING.
+		 В реальности Messenger может повторно доставить job, когда шаг уже в RUNNING.
+		 if (!$step || $step['status'] !== 'PENDING')
+		 {
+		 $this->db->rollBack();
+		 return;
+		 }
+		 */
+		//Рекомендую:
+
+		if (!$step || !in_array($step['status'], [
+				'PENDING',
+				'RUNNING'
+		], true))
+		{
+			$this->db->rollBack();
+			return;
+		}
+
+		//И дополнительно:
+		if ($step['status'] === 'RUNNING' && $step['attempt'] > 1)
 		{
 			$this->db->rollBack();
 			return;
@@ -90,15 +111,13 @@ final class RunProcessStepHandler
 					}
 					$this->generateDocument($message->processId);
 					break;
-				case 'finalize':
+				case 'finalize' :
 					if (!method_exists($this, 'callFinalize'))
 					{
 						throw new \LogicException('callFinalize() not implemented');
 					}
 					$this->callFinalize($message->processId);
 					break;
-					
-					
 
 				default :
 					throw new \LogicException('Unknown step: ' . $message->stepName);
