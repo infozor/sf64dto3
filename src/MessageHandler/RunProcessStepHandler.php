@@ -1,10 +1,8 @@
 <?php
 
-// src/MessageHandler/RunProcessStepHandler.php
 namespace App\MessageHandler;
 
 use App\Message\RunProcessStepMessage;
-//use App\Process\ProcessOrchestrator;
 use App\ModuleProcess\Orchestrator\ProcessOrchestrator;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
@@ -19,68 +17,56 @@ final class RunProcessStepHandler
 	{
 		$this->db->beginTransaction();
 
-		$step = $this->db->fetchAssociative('SELECT * FROM process_step WHERE process_instance_id = ? AND step_name = ? FOR UPDATE', [
+		$step = $this->db->fetchAssociative('SELECT * FROM process_step 
+             WHERE process_instance_id = ? AND step_name = ? 
+             FOR UPDATE', [
 				$message->processId,
 				$message->stepName
 		]);
 
-		/*
-		 Сейчас ты проверяешь только PENDING.
-		 В реальности Messenger может повторно доставить job, когда шаг уже в RUNNING.
-		 if (!$step || $step['status'] !== 'PENDING')
-		 {
-		 $this->db->rollBack();
-		 return;
-		 }
-		 */
-		//Рекомендую:
+		if (!$step)
+		{
+			$this->db->rollBack();
+			return;
+		}
 
-		if (!$step || !in_array($step['status'], [
-				'PENDING',
-				'RUNNING'
+		// Идемпотентность: не даём повторно выполнять DONE
+		if (in_array($step['status'], [
+				'DONE',
+				'FAILED'
 		], true))
 		{
 			$this->db->rollBack();
 			return;
 		}
 
-		//И дополнительно:
+		// Если RUNNING — допускаем повтор только при retry Messenger (attempt == 0 или 1)
 		if ($step['status'] === 'RUNNING' && $step['attempt'] > 1)
 		{
 			$this->db->rollBack();
 			return;
 		}
 
-		$this->db->executeStatement('UPDATE process_step SET status = ?, attempt = attempt + 1 WHERE id = ?', [
+		// Переводим в RUNNING атомарно
+		$this->db->executeStatement('UPDATE process_step 
+             SET status = ?, attempt = attempt + 1, locked_at = NOW() 
+             WHERE id = ?', [
 				'RUNNING',
 				$step['id']
 		]);
 
 		$this->db->commit();
 
-		// Бизнес-логика шага
-		//sleep(1); // имитация работы
-
-		// 2. Выполняем бизнес-логику
 		try
 		{
+			// === БИЗНЕС-ЛОГИКА ===
 			switch ($message->stepName)
 			{
 				case 'prepare' :
-					// Начальный шаг процесса
-					// Пока можно просто “пустышку”, если бизнес-логика не нужна
-					// Либо сюда помещаем инициализацию данных, валидацию, логирование
-
-					if (!method_exists($this, 'callPrepare'))
-					{
-						throw new \LogicException('callPrepare() not implemented');
-					}
 					$this->callPrepare($message->processId);
-
 					break;
 
 				case 'dispatch' :
-					// точка ветвления
 					$this->orchestrator->fanOut($message->processId, 'dispatch_fanout_1', [
 							'call_api_a',
 							'call_api_b',
@@ -89,33 +75,18 @@ final class RunProcessStepHandler
 					break;
 
 				case 'call_api_a' :
-					if (!method_exists($this, 'callApiA'))
-					{
-						throw new \LogicException('callApiA() not implemented');
-					}
 					$this->callApiA($message->processId);
 					break;
 
 				case 'call_api_b' :
-					if (!method_exists($this, 'callApiB'))
-					{
-						throw new \LogicException('callApiB() not implemented');
-					}
 					$this->callApiB($message->processId);
 					break;
 
 				case 'generate_doc' :
-					if (!method_exists($this, 'generateDocument'))
-					{
-						throw new \LogicException('generateDocument() not implemented');
-					}
 					$this->generateDocument($message->processId);
 					break;
+
 				case 'finalize' :
-					if (!method_exists($this, 'callFinalize'))
-					{
-						throw new \LogicException('callFinalize() not implemented');
-					}
 					$this->callFinalize($message->processId);
 					break;
 
@@ -123,7 +94,7 @@ final class RunProcessStepHandler
 					throw new \LogicException('Unknown step: ' . $message->stepName);
 			}
 
-			// 3. Если дошли сюда — шаг УСПЕШНО завершён
+			// === УСПЕХ ===
 			$this->orchestrator->markStepDone($message->processId, $message->stepName);
 
 			if ($message->stepName === 'prepare')
@@ -131,7 +102,6 @@ final class RunProcessStepHandler
 				$this->orchestrator->afterPrepare($message->processId);
 			}
 
-			// 4. Если шаг участвует в fan-out группе — пытаемся пройти join
 			if (!empty($step['join_group']))
 			{
 				$this->orchestrator->tryJoin($message->processId, $step['join_group'], 'finalize');
@@ -139,26 +109,22 @@ final class RunProcessStepHandler
 		}
 		catch ( \Throwable $e )
 		{
-			// 5. Любая ошибка = FAILED
+			// === АВАРИЯ ===
 			$this->orchestrator->markStepFailed($message->processId, $message->stepName, $e->getMessage());
 
-			// 6. Пробрасываем исключение, чтобы Messenger сделал retry / failure transport
-			throw $e;
+			throw $e; // Messenger сам сделает retry / failure transport
 		}
 	}
 	private function callPrepare(int $processId): void
 	{
-		// throw new \RuntimeException('API A failed (test)');
 		sleep(1);
 	}
 	private function callApiA(int $processId): void
 	{
-		// throw new \RuntimeException('API A failed (test)');
 		sleep(1);
 	}
 	private function callApiB(int $processId): void
 	{
-		// throw new \RuntimeException('API B failed (test)');
 		sleep(1);
 	}
 	private function generateDocument(int $processId): void
@@ -170,3 +136,4 @@ final class RunProcessStepHandler
 		sleep(1);
 	}
 }
+
