@@ -6,11 +6,12 @@ use App\Message\RunProcessStepMessage;
 use App\ModuleProcess\Orchestrator\ProcessOrchestrator;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Component\HttpKernel\KernelInterface;
 
 #[AsMessageHandler]
 final class RunProcessStepHandler
 {
-	public function __construct(private Connection $db, private ProcessOrchestrator $orchestrator)
+	public function __construct(private Connection $db, private ProcessOrchestrator $orchestrator, private KernelInterface $kernel) // ✅ добавили
 	{
 	}
 	public function __invoke(RunProcessStepMessage $message): void
@@ -47,13 +48,30 @@ final class RunProcessStepHandler
 			return;
 		}
 
-		// Переводим в RUNNING атомарно
-		$this->db->executeStatement('UPDATE process_step 
-             SET status = ?, attempt = attempt + 1, locked_at = NOW() 
-             WHERE id = ?', [
+		/*
+		 // Переводим в RUNNING атомарно
+		 $this->db->executeStatement('UPDATE process_step 
+		 SET status = ?, attempt = attempt + 1, locked_at = NOW() 
+		 WHERE id = ?', [
+		 'RUNNING',
+		 $step['id']
+		 ]);
+		 */
+		// Атомарно забираем шаг в работу (защита от гонок воркеров)
+		$affected = $this->db->executeStatement('UPDATE process_step
+     SET status = ?, attempt = attempt + 1, locked_at = NOW()
+     WHERE id = ? AND status = ?', [
 				'RUNNING',
-				$step['id']
+				$step['id'],
+				'PENDING'
 		]);
+
+		if ($affected === 0)
+		{
+			// Шаг уже забрал другой воркер или уже не PENDING
+			$this->db->rollBack();
+			return;
+		}
 
 		$this->db->commit();
 
@@ -67,6 +85,11 @@ final class RunProcessStepHandler
 					break;
 
 				case 'dispatch' :
+					$projectDir = $this->kernel->getProjectDir();
+					$path = realpath($projectDir . "/var/logs");
+					$file = $path . '/process_debug.log';
+					file_put_contents($file, date('d.m.Y H:i:s') . " DISPATCH start process={$message->processId}\n", FILE_APPEND);
+
 					$this->orchestrator->fanOut($message->processId, 'dispatch_fanout_1', [
 							'call_api_a',
 							'call_api_b',

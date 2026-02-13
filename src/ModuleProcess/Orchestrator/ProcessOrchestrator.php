@@ -97,7 +97,7 @@ final class ProcessOrchestrator
 
 		$this->db->commit();
 	}
-	public function fanOut(int $processId, string $joinGroup, array $steps): void
+	public function fanOut_old(int $processId, string $joinGroup, array $steps): void
 	{
 		$this->db->beginTransaction();
 
@@ -120,6 +120,39 @@ final class ProcessOrchestrator
 			$this->bus->dispatch(new RunProcessStepMessage($processId, $stepName));
 		}
 	}
+	
+	/* Патч 1: fanOut — диспатчить только реально созданные шаги
+	 * Эффект:
+     * retry dispatch не создаёт дубликатов сообщений
+     * fanOut становится exactly-once по диспатчу
+	 */
+	
+	public function fanOut(int $processId, string $joinGroup, array $steps): void
+	{
+		$this->db->beginTransaction();
+		
+		$created = [];
+		
+		foreach ($steps as $stepName) {
+			$affected = $this->db->executeStatement(
+					'INSERT INTO process_step (process_instance_id, step_name, status, join_group)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (process_instance_id, step_name) DO NOTHING',
+					[$processId, $stepName, 'PENDING', $joinGroup]
+					);
+			
+			if ($affected === 1) {
+				$created[] = $stepName; // ← только новые шаги диспатчим
+			}
+		}
+		
+		$this->db->commit();
+		
+		foreach ($created as $stepName) {
+			$this->bus->dispatch(new RunProcessStepMessage($processId, $stepName));
+		}
+	}
+	
 	public function tryJoin(int $processId, string $joinGroup, string $nextStep): void
 	{
 		$this->db->beginTransaction();
