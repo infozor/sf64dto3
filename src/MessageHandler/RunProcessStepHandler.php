@@ -6,12 +6,13 @@ use App\Message\RunProcessStepMessage;
 use App\ModuleProcess\Orchestrator\ProcessOrchestrator;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
-use Symfony\Component\HttpKernel\KernelInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 #[AsMessageHandler]
 final class RunProcessStepHandler
 {
-	public function __construct(private Connection $db, private ProcessOrchestrator $orchestrator, private KernelInterface $kernel) // ✅ добавили
+	public function __construct(private Connection $db, private ProcessOrchestrator $orchestrator, 
+	#[Autowire('%kernel.project_dir%')] private string $projectDir)
 	{
 	}
 	public function __invoke(RunProcessStepMessage $message): void
@@ -85,7 +86,7 @@ final class RunProcessStepHandler
 					break;
 
 				case 'dispatch' :
-					$projectDir = $this->kernel->getProjectDir();
+					$projectDir = $this->projectDir;
 					$path = realpath($projectDir . "/var/logs");
 					$file = $path . '/process_debug.log';
 					file_put_contents($file, date('d.m.Y H:i:s') . " DISPATCH start process={$message->processId}\n", FILE_APPEND);
