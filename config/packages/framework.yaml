@@ -16,8 +16,6 @@ framework:
     #fragments: true
     php_errors:
         log: true
-        
-    timezone: 'Europe/Moscow'        
 
 when@test:
     framework:
