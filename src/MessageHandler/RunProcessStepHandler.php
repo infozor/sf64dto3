@@ -6,14 +6,13 @@ use App\Message\RunProcessStepMessage;
 use App\ModuleProcess\Orchestrator\ProcessOrchestrator;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
-use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 #[AsMessageHandler]
 final class RunProcessStepHandler
 {
-	public function __construct(private Connection $db, private ProcessOrchestrator $orchestrator, 
-	#[Autowire('%kernel.project_dir%')] private string $projectDir)
+	public function __construct(private Connection $db, private ProcessOrchestrator $orchestrator, private string $projectDir)
 	{
+		$this->projectDir = $projectDir;
 	}
 	public function __invoke(RunProcessStepMessage $message): void
 	{

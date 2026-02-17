@@ -26,3 +26,7 @@ services:
    # Явно (не обязательно, но наглядно)
     App\ModuleProcess\Orchestrator\ProcessOrchestrator:
        public: false
+       
+    App\MessageHandler\RunProcessStepHandler:
+        arguments:
+            $projectDir: '%kernel.project_dir%'       
